@@ -1,0 +1,126 @@
+@import "tailwindcss";
+
+:root {
+  --bg-primary: #000000;
+  --bg-secondary: #0a0a0a;
+  --bg-tertiary: #141414;
+  --bg-surface: #18181b;
+  --border-subtle: #27272a;
+  --border-strong: #3f3f46;
+  --text-primary: #f4f4f5;
+  --text-muted: #a1a1aa;
+  --text-subtle: #71717a;
+  --accent-orange: #ff6700;
+  --accent-orange-hover: #ff5500;
+  --accent-orange-soft: rgba(255, 103, 0, 0.12);
+}
+
+body {
+  background-color: var(--bg-primary);
+  color: var(--text-primary);
+  font-family: -apple-system, BlinkMacSystemFont, "SF Pro Display", "SF Pro Text", "Inter", sans-serif;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  min-height: 100vh;
+  margin: 0;
+  padding: 0;
+}
+
+/* Apple-style minimalist 20% radius geometry classes */
+.card-apple {
+  background-color: var(--bg-secondary);
+  border: 1px solid var(--border-subtle);
+  border-radius: 1.25rem; /* ~20% corner rounding on standard modules */
+  transition: border-color 0.15s ease, background-color 0.15s ease;
+}
+
+.card-apple:hover {
+  border-color: var(--border-strong);
+}
+
+.card-surface {
+  background-color: var(--bg-tertiary);
+  border: 1px solid var(--border-subtle);
+  border-radius: 1.25rem;
+}
+
+.btn-orange {
+  background-color: var(--accent-orange);
+  color: #ffffff;
+  font-weight: 500;
+  border-radius: 1.25rem;
+  transition: background-color 0.15s ease, transform 0.1s ease;
+}
+
+.btn-orange:hover {
+  background-color: var(--accent-orange-hover);
+}
+
+.btn-secondary {
+  background-color: #1c1c1e;
+  color: #f4f4f5;
+  border: 1px solid var(--border-subtle);
+  font-weight: 500;
+  border-radius: 1.25rem;
+  transition: all 0.15s ease;
+}
+
+.btn-secondary:hover {
+  background-color: #27272a;
+  border-color: var(--border-strong);
+}
+
+.btn-outline {
+  background-color: transparent;
+  color: #f4f4f5;
+  border: 1px solid var(--border-subtle);
+  font-weight: 500;
+  border-radius: 1.25rem;
+  transition: all 0.15s ease;
+}
+
+.btn-outline:hover {
+  border-color: #a1a1aa;
+}
+
+.input-apple {
+  background-color: #121214;
+  border: 1px solid var(--border-subtle);
+  border-radius: 1.25rem;
+  color: #f4f4f5;
+  padding: 0.75rem 1rem;
+  font-size: 0.875rem;
+  transition: border-color 0.15s ease;
+}
+
+.input-apple:focus {
+  outline: none;
+  border-color: var(--accent-orange);
+}
+
+.badge-orange {
+  background-color: var(--accent-orange-soft);
+  color: var(--accent-orange);
+  border: 1px solid rgba(255, 103, 0, 0.28);
+  border-radius: 1.25rem;
+  padding: 0.25rem 0.75rem;
+  font-size: 0.75rem;
+  font-weight: 600;
+  letter-spacing: 0.025em;
+}
+
+/* Minimalist scrollbars */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+::-webkit-scrollbar-track {
+  background: #000000;
+}
+::-webkit-scrollbar-thumb {
+  background: #27272a;
+  border-radius: 1rem;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: #3f3f46;
+}

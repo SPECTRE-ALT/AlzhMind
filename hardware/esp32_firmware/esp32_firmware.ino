@@ -3,6 +3,7 @@
  * Features:
  *   - MAX30102 Optical Sensor for Pulse Oximetry (Heart Rate BPM & SpO2 %)
  *   - MPU6050 6-Axis Motion IMU for Fall Detection & Spatial Wandering
+ *   - SSD1306 I2C OLED and TM1637 4-digit display for local status
  *   - Wi-Fi Connectivity & HTTP/REST Payload transmission to Alzhmind Backend
  *   - Deep Sleep / Emergency Beacon alert state management
  */
@@ -11,10 +12,13 @@
 #include <HTTPClient.h>
 #include <Wire.h>
 #include <ArduinoJson.h>
+#include <Adafruit_GFX.h>
+#include <Adafruit_SSD1306.h>
 #include "MAX30105.h"
 #include "heartRate.h"
 #include <Adafruit_MPU6050.h>
 #include <Adafruit_Sensor.h>
+#include <TM1637Display.h>
 
 // ================= Network Configuration =================
 const char* WIFI_SSID     = "YOUR_WIFI_SSID";
@@ -25,9 +29,25 @@ const char* SERVER_ENDPOINT = "http://192.168.1.100:8000/api/telemetry";
 const char* DEVICE_ID       = "ESP32-ALZH-NODE-01";
 const char* PATIENT_ID      = "patient_7849_carter";
 
+// ================= Hardware Pins =================
+constexpr uint8_t I2C_SDA_PIN = 21;
+constexpr uint8_t I2C_SCL_PIN = 22;
+constexpr uint8_t TM1637_CLK_PIN = 25;
+constexpr uint8_t TM1637_DIO_PIN = 26;
+constexpr uint8_t OLED_I2C_ADDRESS = 0x3C;
+constexpr uint32_t DISPLAY_REFRESH_MS = 500;
+
 // ================= Sensor Instances =================
 MAX30105 particleSensor;
 Adafruit_MPU6050 mpu;
+Adafruit_SSD1306 oled(128, 64, &Wire, -1);
+TM1637Display digitDisplay(TM1637_CLK_PIN, TM1637_DIO_PIN);
+
+bool max30102Ready = false;
+bool mpuReady = false;
+bool oledReady = false;
+bool fingerPresent = false;
+unsigned long lastDisplayRefresh = 0;
 
 // ================= Fall Detection Constants =================
 const float FALL_FREEFALL_THRESHOLD = 0.55; // in g
@@ -40,12 +60,14 @@ bool emergencyFallActive = false;
 
 // ================= Vital Sign Calculation Buffers =================
 const byte RATE_SIZE = 4; // Increase for more averaging
-byte rates[RATE_SIZE]; 
+byte rates[RATE_SIZE];
 byte rateSpot = 0;
-long lastBeat = 0; 
+byte validRateCount = 0;
+long lastBeat = 0;
 float beatsPerMinute = 0.0;
-int beatAvg = 72;
+int beatAvg = 0;
 float estimatedSpO2 = 98.0;
+bool spo2Available = false;
 
 // Transmission timer
 unsigned long lastTelemetrySent = 0;
@@ -58,11 +80,19 @@ void setup() {
   Serial.println(F(" Alzhmind ESP32 IoT Medical Node Init "));
   Serial.println(F("======================================"));
 
-  // Initialize I2C Bus (Default ESP32: SDA=21, SCL=22)
-  Wire.begin(21, 22, 100000);
+  // Initialize I2C bus shared by the OLED, MPU6050, and MAX30102.
+  Wire.begin(I2C_SDA_PIN, I2C_SCL_PIN, 100000);
+  digitDisplay.setBrightness(5);
+  digitDisplay.showNumberDecEx(0, 0, false);
+
+  oledReady = oled.begin(SSD1306_SWITCHCAPVCC, OLED_I2C_ADDRESS);
+  if (!oledReady) {
+    Serial.println(F("[-] OLED not found. Check wiring and I2C address."));
+  }
 
   // 1. Initialize MPU6050
-  if (!mpu.begin()) {
+  mpuReady = mpu.begin(0x68, &Wire);
+  if (!mpuReady) {
     Serial.println(F("[-] Failed to find MPU6050 chip. Check wiring!"));
   } else {
     Serial.println(F("[+] MPU6050 Accelerometer/Gyroscope Connected."));
@@ -71,10 +101,11 @@ void setup() {
     mpu.setFilterBandwidth(MPU6050_BAND_21_HZ);
   }
 
-  // 2. Initialize MAX30102 / MAX30105
-  if (!particleSensor.begin(Wire, I2C_SPEED_FAST)) {
+  // SparkFun's MAX30105 driver also supports the MAX30102 sensor.
+  if (!particleSensor.begin(Wire, I2C_SPEED_STANDARD)) {
     Serial.println(F("[-] MAX30102 was not found. Check power/wiring."));
   } else {
+    max30102Ready = true;
     Serial.println(F("[+] MAX30102 Pulse Oximeter Connected."));
     // Configure sensor with high sensitivity settings
     byte ledBrightness = 60; // 0=Off to 255=50mA
@@ -116,6 +147,12 @@ void connectWiFi() {
 }
 
 void processMotionAndFallDetection(float &totalAcc, bool &isFall) {
+  if (!mpuReady) {
+    totalAcc = 0.0;
+    isFall = false;
+    return;
+  }
+
   sensors_event_t a, g, temp;
   mpu.getEvent(&a, &g, &temp);
 
@@ -151,7 +188,16 @@ void processMotionAndFallDetection(float &totalAcc, bool &isFall) {
 }
 
 void processVitals() {
+  if (!max30102Ready) {
+    fingerPresent = false;
+    return;
+  }
+
   long irValue = particleSensor.getIR();
+  fingerPresent = irValue > 50000;
+  if (!fingerPresent) {
+    spo2Available = false;
+  }
 
   if (checkForBeat(irValue) == true) {
     long delta = millis() - lastBeat;
@@ -162,28 +208,76 @@ void processVitals() {
     if (beatsPerMinute < 255 && beatsPerMinute > 20) {
       rates[rateSpot++] = (byte)beatsPerMinute;
       rateSpot %= RATE_SIZE;
+      if (validRateCount < RATE_SIZE) {
+        validRateCount++;
+      }
 
       // Average the readings
       beatAvg = 0;
-      for (byte x = 0; x < RATE_SIZE; x++) {
+      for (byte x = 0; x < validRateCount; x++) {
         beatAvg += rates[x];
       }
-      beatAvg /= RATE_SIZE;
+      beatAvg /= validRateCount;
     }
   }
 
   // Estimate SpO2 based on Red and IR ratio
   long redValue = particleSensor.getRed();
-  if (irValue > 50000 && redValue > 50000) {
+  if (fingerPresent && redValue > 50000) {
     float ratio = ((float)redValue / (float)irValue);
     // Empirical approximation curve for MAX30102
     estimatedSpO2 = 110.0 - (25.0 * ratio);
     if (estimatedSpO2 > 100.0) estimatedSpO2 = 99.4;
     if (estimatedSpO2 < 80.0) estimatedSpO2 = 82.0;
+    spo2Available = true;
   } else {
-    // Finger not detected on sensor
-    if (beatAvg == 0) beatAvg = 72;
+    spo2Available = false;
   }
+}
+
+void updateDisplays(float totalAcc, bool fallDetected) {
+  if (fingerPresent && beatAvg > 30) {
+    digitDisplay.showNumberDec(beatAvg, false);
+  } else {
+    const uint8_t dashSegments[] = {SEG_G, SEG_G, SEG_G, SEG_G};
+    digitDisplay.setSegments(dashSegments);
+  }
+
+  if (!oledReady) {
+    return;
+  }
+
+  oled.clearDisplay();
+  oled.setTextColor(SSD1306_WHITE);
+  oled.setTextSize(1);
+  oled.setCursor(0, 0);
+  oled.println(F("AlzhMind | ESP32"));
+  oled.println();
+  oled.print(F("Heart rate: "));
+  if (fingerPresent && beatAvg > 30) {
+    oled.print(beatAvg);
+    oled.println(F(" BPM"));
+  } else {
+    oled.println(F("-- BPM"));
+  }
+  oled.print(F("SpO2: "));
+  if (spo2Available) {
+    oled.print(estimatedSpO2, 1);
+    oled.println(F(" %"));
+  } else {
+    oled.println(F("-- %"));
+  }
+  oled.print(F("Motion: "));
+  if (mpuReady) {
+    oled.print(totalAcc, 2);
+    oled.println(F(" g"));
+  } else {
+    oled.println(F("sensor error"));
+  }
+  if (fallDetected) {
+    oled.println(F("FALL ALERT"));
+  }
+  oled.display();
 }
 
 void sendTelemetryPayload(float totalAcc, bool fallDetected) {
@@ -243,6 +337,11 @@ void loop() {
   // Process MAX30102 Vitals
   processVitals();
 
+  if (millis() - lastDisplayRefresh >= DISPLAY_REFRESH_MS) {
+    lastDisplayRefresh = millis();
+    updateDisplays(currentAcc, isFall);
+  }
+
   // Periodic Telemetry Dispatch
   if (millis() - lastTelemetrySent >= TELEMETRY_INTERVAL_MS) {
     sendTelemetryPayload(currentAcc, isFall);
@@ -251,4 +350,3 @@ void loop() {
 
   delay(20); // Tight loop for beat sampling
 }
-

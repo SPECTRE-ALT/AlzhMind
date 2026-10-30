@@ -74,7 +74,7 @@ d:\AlzhMind\
 └── hardware\
     ├── README.md               # Hardware pinouts, wiring guide & fall detection physics
     └── esp32_firmware\
-        └── esp32_firmware.ino  # Modular C++/Arduino code for ESP32 + MAX30102 + MPU6050
+        └── esp32_firmware.ino  # ESP32 + MAX30102 + MPU6050 + SSD1306 OLED + TM1637 display
 ```
 
 ---
@@ -112,4 +112,3 @@ Ensure Ollama is installed and run:
 ollama run llama3.1:3b
 ```
 EzCare will automatically connect to `http://localhost:11434`. (If Ollama is not yet downloaded, Alzhmind's resilient fallback engine handles patient prompts seamlessly).
-
